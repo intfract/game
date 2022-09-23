@@ -1,4 +1,4 @@
-var Engine = Matter.Engine,
+Engine = Matter.Engine,
   Render = Matter.Render,
   Runner = Matter.Runner,
   MouseConstraint = Matter.MouseConstraint,
@@ -34,6 +34,7 @@ function deg(rad) {
 }
 
 function box(x, y, w, h, offset, static, render, friction, radius) {
+  let label = 'box'
   if (!static) static = false
   if (!render) render = {
     visible: true,
@@ -45,13 +46,16 @@ function box(x, y, w, h, offset, static, render, friction, radius) {
   if (!radius) {
     radius = 0
   }
+  if (static) label = 'ground'
   return Bodies.rectangle(x + (offset[0] * w / 2), y + (offset[1] * h / 2), w, h, {
     isStatic: static,
     friction: friction,
     render: render,
     chamfer: {
       radius: radius,
-    }
+    },
+    label: label,
+    o: vector(x, y)
   })
 }
 
@@ -104,11 +108,11 @@ var runner = Runner.create();
 Runner.run(runner, engine);
 
 const map = [
-  box(-960, 90, 960, 660 + 600, [0, -1], true, {
+  box(-960, 30, 960, 600 + 600, [0, -1], true, {
     fillStyle: color.cave
   }), // left wall 
 
-  box(0, 60, 960, 60, false, true, {
+  box(-960 - 960 / 2, 30, 960 * 4, 300, [1, 1], true, {
     fillStyle: color.cave
   }), // floor 
 
@@ -116,7 +120,7 @@ const map = [
     fillStyle: color.cave
   }), // slope 
 
-  box(960, 90, 960, 300, [0, -1], true, {
+  box(960, 30, 960, 240, [0, -1], true, {
     fillStyle: color.cave
   }), // side platform  
 
@@ -132,10 +136,15 @@ const map = [
     fillStyle: color.cave
   }), // ledge 
 
-  box(960 * 2, 90, 960, 660 + 600, [0, -1], true, {
+  box(960 * 2, 30, 960, 600 + 600, [0, -1], true, {
     fillStyle: color.cave
   }), // right wall 
 ]
+
+// Text Tutorial 
+
+const canvas = document.querySelector('canvas')
+const ctx = canvas.getContext('2d')
 
 const level = Composite.create()
 Composite.add(level, map)
@@ -143,14 +152,13 @@ Composite.add(level, map)
 // add bodies
 Composite.add(world, level)
 
-Composite.add(world, [
+const boxes = [
   // push box 
-  box(60, 0, 60, 60, false, false, false, 0.05, 10),
-  box(480 + 120, -420, 60, 60, [1, -1], false, false, 0.05, 10),
-  box(480 + 120, -480, 60, 60, [1, -1], false, false, 0.05, 10),
-])
-
-
+  box(-60, -120, 60, 60, false, false, false, 0.05, 10),
+  box(480 + 240, -480, 60, 60, [1, -1], false, false, 0.05, 10),
+  box(480 + 240, -540, 60, 60, [1, -1], false, false, 0.05, 10),
+]
+Composite.add(world, boxes)
 
 // add mouse control
 var mouse = Mouse.create(render.canvas),
@@ -180,16 +188,12 @@ Events.on(engine, 'collisionStart', function(event) {
     let pair = pairs[i];
     if (pair.bodyA === player.body) {
       if (pair.bodyB.bozo) {
-        Body.setVelocity(pair.bodyB, vector())
-        Body.setPosition(pair.bodyB, pair.bodyB.o)
         mortify()
       }
     }
 
     if (pair.bodyB === player.body) {
       if (pair.bodyA.bozo) {
-        Body.setVelocity(pair.bodyA, vector())
-        Body.setPosition(pair.bodyA, pair.bodyA.o)
         mortify()
       }
     }
@@ -226,6 +230,7 @@ class Player {
   constructor() {
     this.body = Bodies.circle(0, 0, 30, {
       restitution: 0,
+      label: 'player',
       render: {
         fillStyle: color.blue
       }
@@ -240,6 +245,7 @@ class Player {
       x: 0,
       y: 0,
     }
+    this.body.cps = []
   }
 
   get x() {
@@ -256,9 +262,12 @@ class Player {
 }
 
 class Bozo {
-  constructor(x, y) {
+  constructor(x, y, xv, yv, dynamic) {
+    if (!xv) xv = 0
+    if (!yv) yv = 0
     this.body = Bodies.circle(x, y, 30, {
       restitution: 1,
+      label: 'bozo',
       render: {
         fillStyle: color.red
       }
@@ -280,7 +289,11 @@ class Bozo {
     }
     this.body.collisionFilter.group = -2
     this.sensor.collisionFilter.group = -2
-    this.parts = [this.body, this.sensor]
+    this.body.xv = xv
+    this.body.yv = yv
+    this.body.dynamic = dynamic
+    Body.setVelocity(this.body, vector(xv, yv))
+    this.parts = [this.body]
   }
 
   get x() {
@@ -300,10 +313,16 @@ const player = new Player()
 player.body.collisionFilter.group = -1
 player.sensor.collisionFilter.group = -1
 
+const bozos = [
+  ...(new Bozo(0, -120)).parts,
+  ...(new Bozo(-120, -120)).parts,
+  ...(new Bozo(-240, -120)).parts,
+  ...(new Bozo(480, -480, -30, 0)).parts,
+  ...(new Bozo(480, -480, 0, 30)).parts,
+]
+
 Composite.add(world, [player.body, player.sensor])
-Composite.add(world, [
-  ...(new Bozo(0, -120)).parts
-])
+Composite.add(world, bozos)
 
 var keys = {}
 
@@ -342,10 +361,44 @@ function move() {
 }
 
 function mortify() {
+  const bodies = Composite.allBodies(world)
+  for (let i = 0; i < bodies.length; i++) {
+    let body = bodies[i]
+    if (body.label === 'bozo') {
+      Body.setVelocity(body, vector(body.xv, body.yv))
+      Body.setPosition(body, body.o)
+      Composite.remove(world, body)
+    } else if (body.label === 'box') {
+      Body.setVelocity(body, vector())
+      Body.setPosition(body, body.o)
+      Body.setAngle(body, 0)
+      Composite.remove(world, body)
+    }
+  }
+  player.body.cps = []
   Body.setVelocity(player.body, vector())
   Body.setPosition(player.body, vector())
-  console.log(player.body)
+  Composite.add(world, bozos)
+  Composite.add(world, boxes)
+  console.log(Composite.allBodies(world))
 }
+
+function text(message, color, x, y, size, baseline) {
+  if (!baseline) {
+    baseline = 'middle'
+  }
+  ctx.font = `${30 * canvas.width / ratio}px Lexend Deca`
+  ctx.fillStyle = color
+  ctx.textBaseline = baseline
+  ctx.textAlign = 'center'
+  const fx = Math.round((x - player.body.position.x) * canvas.width / (ratio * 2) + canvas.width / 2)
+  const fy = Math.round((y - player.body.position.y) * canvas.width / (ratio * 2) + canvas.height / 2)
+  ctx.fillText(message, fx, fy)
+}
+
+const ratio = 1200
+
+var count = 0
 
 function tick() {
   handle([65, 68, 87])
@@ -357,7 +410,23 @@ function tick() {
     mortify()
   }
 
-  Render.lookAt(render, player.body, vector(window.innerWidth, window.innerHeight));
+  if (player.x > 960 && !player.body.cps[0]) {
+    player.body.cps.push(vector(960, -300))
+    Composite.add(world, [
+      ...(new Bozo(960 + 480, -300, -30, 0, true)).parts,
+    ])
+  }
+
+  if (player.x > 1050 && !player.body.cps[1]) {
+    player.body.cps.push(vector(1050, -300))
+    Composite.add(world, [
+      ...(new Bozo(960 + 480, -300, -30, 0, true)).parts,
+    ])
+  }
+
+  Render.lookAt(render, player.body, vector(ratio - player.body.circleRadius));
+  text('Use WASD to navigate!', color.cave, 0, -240, 30)
+  text('Move boxes with your mouse!', color.cave, 960, -960, 30)
   window.requestAnimationFrame(tick)
 }
 

@@ -5,3 +5,8 @@ body {
   padding: 0;
   overflow: hidden;
 }
+
+@font-face {
+  font-family: 'Lexend Deca';
+  src: url('lexend.ttf');
+}
